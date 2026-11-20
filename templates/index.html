@@ -14,10 +14,11 @@
       document.documentElement.classList.toggle('dark', e.matches);
     });
   </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
     .log-viewer { font-family: 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; }
+    .log-viewer .qr-line { line-height: 1; white-space: pre; word-break: normal; }
     .log-viewer::-webkit-scrollbar { width: 6px; }
     .log-viewer::-webkit-scrollbar-thumb { border-radius: 3px; }
     .dark .log-viewer::-webkit-scrollbar-thumb { background: #4b5563; }
@@ -141,11 +142,9 @@
                 </label>
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3" x-show="config.channels.whatsapp.enabled">
-                <div>
-                  <label class="block text-xs text-gray-500 mb-1">Bridge URL</label>
-                  <input type="text" class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                         x-model="config.channels.whatsapp.bridgeUrl" placeholder="ws://localhost:3001">
-                </div>
+                <p class="md:col-span-2 text-xs text-gray-500 dark:text-gray-400">
+                  After saving, open <span class="font-medium">Status → Recent Logs</span> and scan the QR code with WhatsApp → Linked Devices. The session is stored on the volume, so you only pair once.
+                </p>
                 <div>
                   <label class="block text-xs text-gray-500 mb-1">Allowed Numbers (comma-separated)</label>
                   <input type="text" class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -200,18 +199,32 @@
           <div class="bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800 rounded-xl p-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label class="block text-xs text-gray-500 mb-1">Brave Search API Key</label>
+                <label class="block text-xs text-gray-500 mb-1">Web Search Provider</label>
+                <select class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        x-model="config.tools.web.search.provider">
+                  <template x-for="s in searchProviders" :key="s.key">
+                    <option :value="s.key" x-text="s.label" :selected="s.key === config.tools.web.search.provider"></option>
+                  </template>
+                </select>
+              </div>
+              <div x-show="searchProvider().credential === 'api_key'">
+                <label class="block text-xs text-gray-500 mb-1">Search API Key</label>
                 <input type="password" class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                       x-model="config.tools.web.search.apiKey" placeholder="Enter Brave Search API key">
+                       x-model="config.tools.web.search.apiKey" :placeholder="'Enter ' + searchProvider().label + ' API key'">
+              </div>
+              <div x-show="searchProvider().credential === 'base_url'">
+                <label class="block text-xs text-gray-500 mb-1">Search Base URL</label>
+                <input type="text" class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                       x-model="config.tools.web.search.baseUrl" placeholder="https://searx.example.com">
               </div>
               <div>
-                <label class="block text-xs text-gray-500 mb-1">Exec Timeout (seconds)</label>
+                <label class="block text-xs text-gray-500 mb-1">Exec Max Runtime (seconds)</label>
                 <input type="number" class="w-full bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                       x-model.number="config.tools.exec.timeout">
+                       x-model.number="config.tools.exec.maxRuntime">
               </div>
               <div class="flex items-center gap-2">
-                <input type="checkbox" class="rounded bg-gray-100 border-gray-300 dark:bg-gray-800 dark:border-gray-600" x-model="config.tools.exec.restrictToWorkspace">
-                <label class="text-sm text-gray-500 dark:text-gray-400">Restrict exec to workspace</label>
+                <input type="checkbox" class="rounded bg-gray-100 border-gray-300 dark:bg-gray-800 dark:border-gray-600" x-model="config.tools.restrictToWorkspace">
+                <label class="text-sm text-gray-500 dark:text-gray-400">Restrict tools to workspace</label>
               </div>
             </div>
           </div>
@@ -283,7 +296,10 @@
                 </tr>
               </thead>
               <tbody>
-                <template x-for="(info, name) in (status.providers || {})" :key="name">
+                <tr x-show="configuredProviders().length === 0" class="border-t border-gray-200 dark:border-gray-800">
+                  <td class="px-4 py-2 text-gray-500" colspan="2">No providers configured yet</td>
+                </tr>
+                <template x-for="[name, info] in configuredProviders()" :key="name">
                   <tr class="border-t border-gray-200 dark:border-gray-800">
                     <td class="px-4 py-2 capitalize" x-text="name"></td>
                     <td class="px-4 py-2">
@@ -340,7 +356,8 @@
           </div>
           <div class="bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800 rounded-xl p-4 log-viewer h-96 overflow-y-auto" x-ref="logViewer">
             <template x-for="(line, i) in logs" :key="i">
-              <div class="text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-all" x-text="line"></div>
+              <div class="text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-all"
+                   :class="/[▀▄█]/.test(line) ? 'qr-line' : ''" x-text="line"></div>
             </template>
             <div x-show="logs.length === 0" class="text-gray-400 dark:text-gray-600 text-sm">No logs yet</div>
           </div>
@@ -374,8 +391,30 @@
           { key: 'groq', label: 'Groq', hasBase: false },
           { key: 'gemini', label: 'Gemini', hasBase: false },
           { key: 'zhipu', label: 'Zhipu', hasBase: true },
+          { key: 'mistral', label: 'Mistral', hasBase: false },
           { key: 'vllm', label: 'vLLM', hasBase: true, basePlaceholder: 'http://localhost:8000/v1' },
+          { key: 'ollama', label: 'Ollama', hasBase: true, basePlaceholder: 'http://localhost:11434/v1' },
+          { key: 'custom', label: 'Custom (OpenAI-compatible)', hasBase: true, basePlaceholder: 'https://your-endpoint/v1' },
         ],
+
+        searchProviders: [
+          { key: 'duckduckgo', label: 'DuckDuckGo', credential: 'none' },
+          { key: 'brave', label: 'Brave Search', credential: 'api_key' },
+          { key: 'tavily', label: 'Tavily', credential: 'api_key' },
+          { key: 'exa', label: 'Exa', credential: 'api_key' },
+          { key: 'jina', label: 'Jina', credential: 'api_key' },
+          { key: 'kagi', label: 'Kagi', credential: 'api_key' },
+          { key: 'searxng', label: 'SearXNG', credential: 'base_url' },
+        ],
+
+        searchProvider() {
+          const key = this.config.tools?.web?.search?.provider;
+          return this.searchProviders.find(s => s.key === key) || { key, label: key || 'Search', credential: 'api_key' };
+        },
+
+        configuredProviders() {
+          return Object.entries(this.status.providers || {}).filter(([, info]) => info.configured);
+        },
 
         getProvider(key, field) {
           return this.config.providers?.[key]?.[field] || '';
@@ -492,24 +531,18 @@
 
     function defaultConfig() {
       return {
-        agents: { defaults: { workspace: '~/.nanobot/workspace', model: 'anthropic/claude-opus-4-5', maxTokens: 8192, temperature: 0.7, maxToolIterations: 20 } },
+        agents: { defaults: { model: 'anthropic/claude-opus-4-5', maxTokens: 8192, temperature: 0.1, maxToolIterations: 200 } },
         channels: {
-          telegram: { enabled: false, token: '', allowFrom: [], proxy: null },
-          whatsapp: { enabled: false, bridgeUrl: 'ws://localhost:3001', allowFrom: [] },
+          telegram: { enabled: false, token: '', allowFrom: [] },
+          whatsapp: { enabled: false, allowFrom: [] },
           feishu: { enabled: false, appId: '', appSecret: '', encryptKey: '', verificationToken: '', allowFrom: [] },
         },
-        providers: {
-          anthropic: { apiKey: '', apiBase: null },
-          openai: { apiKey: '', apiBase: null },
-          openrouter: { apiKey: '', apiBase: null },
-          deepseek: { apiKey: '', apiBase: null },
-          groq: { apiKey: '', apiBase: null },
-          gemini: { apiKey: '', apiBase: null },
-          zhipu: { apiKey: '', apiBase: null },
-          vllm: { apiKey: '', apiBase: null },
+        providers: {},
+        tools: {
+          web: { search: { provider: 'duckduckgo', apiKey: '', baseUrl: '', maxResults: 5 } },
+          exec: { maxRuntime: 3600 },
+          restrictToWorkspace: false,
         },
-        gateway: { host: '0.0.0.0', port: 18790 },
-        tools: { web: { search: { apiKey: '', maxResults: 5 } }, exec: { timeout: 60, restrictToWorkspace: false } },
       };
     }
 

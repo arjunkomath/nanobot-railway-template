@@ -1,6 +1,6 @@
 # nanobot Railway Template
 
-One-click deploy [nanobot](https://github.com/nano-bot/nanobot) on [Railway](https://railway.app) with a web-based config UI and status dashboard.
+One-click deploy [nanobot](https://github.com/nano-bot/nanobot) (v0.4.1) on [Railway](https://railway.app) with a web-based config UI and status dashboard.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/nanobot)
 
@@ -71,8 +71,18 @@ The web server runs on `$PORT` and manages the nanobot gateway as a child proces
 
 ## Supported Providers
 
-Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, Gemini, Zhipu, vLLM
+Configurable from the UI: Anthropic, OpenAI, OpenRouter, DeepSeek, Groq, Gemini, Zhipu, Mistral, vLLM, Ollama, and any OpenAI-compatible endpoint (Custom). nanobot supports many more; set them via `NANOBOT_PROVIDERS__<NAME>__API_KEY` env vars.
 
 ## Supported Channels
 
-Telegram, WhatsApp (via bridge), Feishu/Lark
+Configurable from the UI: Telegram, WhatsApp, Feishu/Lark. Their dependencies are baked into the image.
+
+**WhatsApp pairing:** enable the channel and save, then open **Status → Recent Logs** and scan the QR code with WhatsApp → Linked Devices. The session is stored on the `/data` volume, so you only pair once.
+
+## Upgrading from nanobot 0.1.x
+
+Existing configs on the volume are migrated automatically on startup:
+
+- `tools.exec.restrictToWorkspace` moves to `tools.restrictToWorkspace`, and `tools.exec.timeout` is read as `maxRuntime`.
+- Web search now defaults to DuckDuckGo. If you had a Brave API key set, the template pins `tools.web.search.provider` to `brave` so it keeps working.
+- WhatsApp no longer uses a separate bridge (`bridgeUrl` is ignored). Re-pair using the QR code in the logs.

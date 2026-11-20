@@ -1,4 +1,16 @@
+nanobot-ai==0.4.1
 starlette>=0.40.0
 uvicorn>=0.30.0
 jinja2>=3.1.0
 python-multipart>=0.0.9
+
+# Channel dependencies. nanobot installs these on demand when a channel is
+# enabled, but that install lives outside the /data volume and is lost on
+# every redeploy, so bake the ones the config UI exposes into the image.
+python-telegram-bot[socks,webhooks]>=22.6,<23.0
+socksio>=1.0.0,<2.0.0
+python-socks[asyncio]>=2.8.0,<3.0.0
+lark-oapi>=1.5.0,<2.0.0
+neonize>=0.5.2,<1.0.0
+python-magic>=0.4.27
+segno>=1.6.1,<2.0.0
