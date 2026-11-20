@@ -14,7 +14,6 @@ from starlette.applications import Starlette
 from starlette.authentication import (
     AuthCredentials,
     AuthenticationBackend,
-    AuthenticationError,
     SimpleUser,
 )
 from starlette.middleware import Middleware
@@ -25,13 +24,19 @@ from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
 from nanobot.config.loader import (
+    get_config_path,
     load_config,
     save_config,
 )
 from nanobot.config.schema import Config
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
-SECRET_FIELDS = {"api_key", "apiKey", "token", "app_secret", "appSecret", "encrypt_key", "encryptKey", "verification_token", "verificationToken"}
+SECRET_FIELDS = {
+    "api_key", "apiKey", "token", "password",
+    "app_secret", "appSecret", "client_secret", "clientSecret",
+    "encrypt_key", "encryptKey", "verification_token", "verificationToken",
+    "webhook_secret_token", "webhookSecretToken", "token_issue_secret", "tokenIssueSecret",
+}
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -48,20 +53,25 @@ class BasicAuthBackend(AuthenticationBackend):
         if "Authorization" not in conn.headers:
             return None
 
+        # Bad or malformed credentials are treated as anonymous (return None)
+        # rather than raising, so protected routes answer 401 with a
+        # WWW-Authenticate header and the browser re-prompts for a login.
         auth = conn.headers["Authorization"]
         try:
             scheme, credentials = auth.split()
             if scheme.lower() != "basic":
                 return None
-            decoded = base64.b64decode(credentials).decode("ascii")
+            decoded = base64.b64decode(credentials).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
-            raise AuthenticationError("Invalid credentials")
+            return None
 
         username, _, password = decoded.partition(":")
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        if secrets.compare_digest(username.encode(), ADMIN_USERNAME.encode()) and secrets.compare_digest(
+            password.encode(), ADMIN_PASSWORD.encode()
+        ):
             return AuthCredentials(["authenticated"]), SimpleUser(username)
 
-        raise AuthenticationError("Invalid credentials")
+        return None
 
 
 def require_auth(request: Request):
@@ -194,6 +204,32 @@ def merge_secrets(new_data, existing_data):
     return new_data
 
 
+def load_cron_jobs(config: Config) -> list:
+    # nanobot keeps every job in a single store file: {"version": ..., "jobs": [...]}
+    store = config.workspace_path / "cron" / "jobs.json"
+    try:
+        jobs = json.loads(store.read_text()).get("jobs", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return jobs if isinstance(jobs, list) else []
+
+
+def migrate_legacy_config():
+    # nanobot <0.2 used Brave whenever tools.web.search.apiKey was set; newer
+    # versions default to DuckDuckGo unless a provider is named. Pin existing
+    # Brave users to "brave" so upgrading doesn't silently switch providers.
+    path = get_config_path()
+    try:
+        raw = json.loads(path.read_text())
+        search = raw["tools"]["web"]["search"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if isinstance(search, dict) and search.get("apiKey") and not search.get("provider"):
+        search["provider"] = "brave"
+        path.write_text(json.dumps(raw, indent=2, ensure_ascii=False))
+        print("Migrated config: tools.web.search.provider set to 'brave'")
+
+
 async def homepage(request: Request):
     auth_err = require_auth(request)
     if auth_err:
@@ -271,14 +307,7 @@ async def api_status(request: Request):
         if isinstance(chan, dict):
             channels[name] = {"enabled": chan.get("enabled", False)}
 
-    cron_dir = Path.home() / ".nanobot" / "cron"
-    cron_jobs = []
-    if cron_dir.exists():
-        for f in cron_dir.glob("*.json"):
-            try:
-                cron_jobs.append(json.loads(f.read_text()))
-            except Exception:
-                pass
+    cron_jobs = load_cron_jobs(config)
 
     return JSONResponse({
         "gateway": gateway.get_status(),
@@ -321,6 +350,7 @@ async def api_gateway_restart(request: Request):
 
 @asynccontextmanager
 async def lifespan(app):
+    migrate_legacy_config()
     config = load_config()
     if config.get_api_key():
         asyncio.create_task(gateway.start())
